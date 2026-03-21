@@ -1,0 +1,341 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label } from 'recharts';
+import { Calculator, Settings, TrendingDown, Info, Sigma } from 'lucide-react';
+
+const ScalingLawCalculator = () => {
+  // Default coefficients updated based on user's specific correction
+  // L = 0.65163 + 0.32154(N/10^8)^-0.10206 + 0.50357(D/10^8)^-0.30357
+  const defaultParams = {
+    E: 0.65163,
+    A_norm: 0.32154,
+    alpha: 0.10206,
+    B_norm: 0.50357,
+    beta: 0.30357,
+    N0: 1e8,
+    D0: 1e8,
+  };
+
+  const [params, setParams] = useState(defaultParams);
+  
+  // Inputs for N (Parameters) and D (Dataset Size)
+  const [inputs, setInputs] = useState({
+    N: 1.6e8, // 160M
+    D: 8.0e8, // 800M
+  });
+
+  const [loss, setLoss] = useState(0);
+
+  // Helper to format large numbers with metric suffixes (K, M, B, T)
+  const formatMetric = (num) => {
+    if (num === 0) return '0';
+    const absNum = Math.abs(num);
+    
+    if (absNum >= 1e12) {
+      return (num / 1e12).toFixed(2).replace(/\.0+$/, '').replace(/\.$/, '') + 'T';
+    }
+    if (absNum >= 1e9) {
+      return (num / 1e9).toFixed(2).replace(/\.0+$/, '').replace(/\.$/, '') + 'B';
+    }
+    if (absNum >= 1e6) {
+      return (num / 1e6).toFixed(2).replace(/\.0+$/, '').replace(/\.$/, '') + 'M';
+    }
+    if (absNum >= 1e3) {
+      return (num / 1e3).toFixed(2).replace(/\.0+$/, '').replace(/\.$/, '') + 'K';
+    }
+    return num.toLocaleString();
+  };
+
+  // Calculate Loss based on the normalized formula:
+  // L = E + A(N/N0)^-α + B(D/D0)^-β
+  const calculateLoss = (N, D, p) => {
+    const termA = p.A_norm * Math.pow(N / p.N0, -p.alpha);
+    const termB = p.B_norm * Math.pow(D / p.D0, -p.beta);
+    return p.E + termA + termB;
+  };
+
+  useEffect(() => {
+    const calculatedLoss = calculateLoss(inputs.N, inputs.D, params);
+    setLoss(calculatedLoss);
+  }, [inputs, params]);
+
+  // Generate data for the chart (Varying N while D is fixed)
+  const chartData = useMemo(() => {
+    const data = [];
+    const baseN = inputs.N;
+    // Generate points from 0.1x to 10x of current N on log scale
+    for (let i = -10; i <= 10; i++) {
+      const factor = Math.pow(10, i / 5); // 5 steps per decade
+      const currentN = baseN * factor;
+      const val = calculateLoss(currentN, inputs.D, params);
+      data.push({
+        n: currentN,
+        loss: val,
+        isCurrent: i === 0
+      });
+    }
+    return data;
+  }, [inputs, params]);
+
+  const handleParamChange = (e) => {
+    const { name, value } = e.target;
+    setParams(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setInputs(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans">
+      <header className="bg-slate-900 text-white p-4 shadow-md">
+        <div className="max-w-7xl mx-auto flex items-center gap-3">
+          <Calculator size={24} className="text-blue-400" />
+          <h1 className="text-xl font-semibold tracking-tight">MORTM Scaling Law Calculator</h1>
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-auto p-4 md:p-8">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* Left Column: Inputs & Configuration */}
+          <div className="lg:col-span-4 space-y-6">
+            
+            {/* Formula Display */}
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-blue-900">
+               <div className="flex items-center gap-2 mb-2">
+                <Sigma size={18} />
+                <span className="font-semibold text-sm uppercase tracking-wide">Model Formulation</span>
+              </div>
+              <div className="text-center font-serif text-lg py-2">
+                L = E + A<sub className="text-xs">norm</sub>(N/N₀)<sup className="text-xs">-α</sup> + B<sub className="text-xs">norm</sub>(D/D₀)<sup className="text-xs">-β</sup>
+              </div>
+              <p className="text-xs text-blue-700/80 text-center mt-1">
+                Normalized Power Law
+              </p>
+            </div>
+
+            {/* Main Inputs Card */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
+                <Settings size={20} className="text-slate-500" />
+                <h2 className="text-lg font-medium">Model Configuration</h2>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Model Parameters (N)
+                  </label>
+                  <input
+                    type="number"
+                    name="N"
+                    value={inputs.N}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-mono text-sm"
+                  />
+                  <p className="text-xs text-slate-500 mt-1 font-semibold text-blue-600">
+                    Current: {formatMetric(inputs.N)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Dataset Size (D) - Tokens
+                  </label>
+                  <input
+                    type="number"
+                    name="D"
+                    value={inputs.D}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-mono text-sm"
+                  />
+                  <p className="text-xs text-slate-500 mt-1 font-semibold text-green-600">
+                    Current: {formatMetric(inputs.D)} Tokens
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Coefficients Configuration Card */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
+                <Info size={20} className="text-slate-500" />
+                <h2 className="text-lg font-medium">Coefficients (Normalized)</h2>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                   <div className="flex gap-4">
+                      <div className="flex-1">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase">Irreducible Loss (E)</label>
+                        <input
+                            type="number"
+                            name="E"
+                            step="0.00001"
+                            value={params.E}
+                            onChange={handleParamChange}
+                            className="w-full mt-1 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-sm font-mono"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase">Normalization (N₀=D₀)</label>
+                        <input
+                            type="number"
+                            name="N0"
+                            value={params.N0}
+                            disabled
+                            className="w-full mt-1 px-2 py-1 bg-slate-100 border border-slate-200 rounded text-sm font-mono text-slate-400 cursor-not-allowed"
+                            title="Normalization constant is fixed based on estimation"
+                        />
+                      </div>
+                   </div>
+                </div>
+
+                <div className="col-span-2 border-t border-slate-100 my-1"></div>
+
+                {/* Term 1: Parameters */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase text-blue-600">A (Normalized)</label>
+                  <input
+                    type="number"
+                    name="A_norm"
+                    step="0.00001"
+                    value={params.A_norm}
+                    onChange={handleParamChange}
+                    className="w-full mt-1 px-2 py-1 bg-slate-50 border border-blue-200 rounded text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase text-blue-600">Power α (alpha)</label>
+                  <input
+                    type="number"
+                    name="alpha"
+                    step="0.00001"
+                    value={params.alpha}
+                    onChange={handleParamChange}
+                    className="w-full mt-1 px-2 py-1 bg-slate-50 border border-blue-200 rounded text-sm font-mono"
+                  />
+                </div>
+
+                {/* Term 2: Data */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase text-green-600">B (Normalized)</label>
+                  <input
+                    type="number"
+                    name="B_norm"
+                    step="0.00001"
+                    value={params.B_norm}
+                    onChange={handleParamChange}
+                    className="w-full mt-1 px-2 py-1 bg-slate-50 border border-green-200 rounded text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase text-green-600">Power β (beta)</label>
+                  <input
+                    type="number"
+                    name="beta"
+                    step="0.00001"
+                    value={params.beta}
+                    onChange={handleParamChange}
+                    className="w-full mt-1 px-2 py-1 bg-slate-50 border border-green-200 rounded text-sm font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Results & Visualization */}
+          <div className="lg:col-span-8 flex flex-col gap-6">
+            
+            {/* Result Display */}
+            <div className="bg-slate-900 text-white rounded-xl shadow-lg p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div>
+                <h3 className="text-slate-400 font-medium mb-1">Predicted Loss (L)</h3>
+                <div className="text-5xl font-bold font-mono tracking-tighter">
+                  {loss.toFixed(6)}
+                </div>
+                <p className="text-slate-400 text-sm mt-2">
+                   Validation RMSE ≈ 0.00508
+                </p>
+              </div>
+              
+              <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 w-full md:w-auto min-w-[200px]">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingDown size={16} className="text-green-400" />
+                  <span className="text-sm font-medium text-slate-300">Term Breakdown</span>
+                </div>
+                <div className="space-y-1 text-sm font-mono">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Irreducible E:</span>
+                    <span>{params.E.toFixed(5)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-blue-400">Param Term (N):</span>
+                    <span>{(params.A_norm * Math.pow(inputs.N / params.N0, -params.alpha)).toFixed(5)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-green-400">Data Term (D):</span>
+                    <span>{(params.B_norm * Math.pow(inputs.D / params.D0, -params.beta)).toFixed(5)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex-1 min-h-[400px]">
+              <div className="mb-6">
+                <h3 className="text-lg font-medium">Loss Scaling Curve</h3>
+                <p className="text-slate-500 text-sm">
+                  Predicted loss vs. Parameters (N) while keeping Dataset Size (D) fixed at {formatMetric(inputs.D)}.
+                </p>
+              </div>
+
+              <div className="h-[350px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={chartData}
+                    margin={{ top: 10, right: 30, left: 20, bottom: 40 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis 
+                      dataKey="n" 
+                      type="number" 
+                      scale="log" 
+                      domain={['auto', 'auto']}
+                      tickFormatter={(val) => formatMetric(val)}
+                      label={{ value: 'Parameters (N)', position: 'bottom', offset: 0 }}
+                    />
+                    <YAxis 
+                      domain={['auto', 'auto']} 
+                      label={{ value: 'Loss (L)', angle: -90, position: 'insideLeft' }}
+                    />
+                    <Tooltip 
+                      formatter={(value) => [value.toFixed(5), "Loss"]}
+                      labelFormatter={(label) => `N: ${formatMetric(parseFloat(label))}`}
+                      contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff' }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="loss" 
+                      stroke="#2563eb" 
+                      strokeWidth={3} 
+                      dot={false}
+                      activeDot={{ r: 6 }}
+                    />
+                    <ReferenceLine x={inputs.N} stroke="#ef4444" strokeDasharray="3 3">
+                      <Label value="Current N" position="top" fill="#ef4444" fontSize={12} />
+                    </ReferenceLine>
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default ScalingLawCalculator;
