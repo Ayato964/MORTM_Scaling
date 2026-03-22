@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Sidebar from './components/Sidebar';
 import { Menu } from 'lucide-react';
 import LossScalingCurve from './components/LossScalingCurve';

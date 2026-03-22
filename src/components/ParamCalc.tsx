@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Settings, Cpu, Layers, Database, Calculator, Info, Save, AlertTriangle } from 'lucide-react';
+import { Settings, Cpu, Layers, Database, Info, Save, AlertTriangle } from 'lucide-react';
 
 const PRESETS = {
   "MORTM-A (Large)": { vocab_size: 650, d_model: 512, dim_feedforward: 512, num_heads: 8, d_layer: 11, num_experts: 6, topk_experts: 2, use_moe_decoder: true },

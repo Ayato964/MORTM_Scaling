@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calculator, Layers, Settings2, BarChart3, Menu } from 'lucide-react';
+import { Calculator, Layers, Settings2, BarChart3 } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
