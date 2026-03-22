@@ -1,17 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Settings, TrendingDown, Info, Sigma } from 'lucide-react';
+import config from '../config.json';
 
 const LossScalingCurve = () => {
-  const defaultParams = {
-    E: 0.65163,
-    A_norm: 0.32154,
-    alpha: 0.10206,
-    B_norm: 0.50357,
-    beta: 0.30357,
-    N0: 1e8,
-    D0: 1e8,
-  };
+  const defaultParams = config;
 
   const [params, setParams] = useState(defaultParams);
   const [inputs, setInputs] = useState({ N: 1.6e8, D: 8.0e8 });
@@ -160,7 +153,7 @@ const LossScalingCurve = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f4" />
                 <XAxis dataKey="n" type="number" scale="log" domain={['auto', 'auto']} tickFormatter={(val) => formatMetric(val)} stroke="#5f6368" fontSize={12} label={{ value: 'Parameters (N)', position: 'bottom', offset: 0, fill: '#5f6368', fontSize: 12 }} />
                 <YAxis domain={['auto', 'auto']} stroke="#5f6368" fontSize={12} tickFormatter={(val) => val.toFixed(3)} />
-                <Tooltip formatter={(value: number) => [value.toFixed(5), "Loss"]} labelFormatter={(label: any) => `N: ${formatMetric(parseFloat(label))}`} contentStyle={{ borderRadius: '8px', border: '1px solid #dadce0', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)' }} />
+                <Tooltip formatter={(value: any) => [Number(value).toFixed(5), "Loss"]} labelFormatter={(label: any) => `N: ${formatMetric(parseFloat(label))}`} contentStyle={{ borderRadius: '8px', border: '1px solid #dadce0', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)' }} />
                 <Line type="monotone" dataKey="loss" stroke="#1a73e8" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
                 <ReferenceLine x={inputs.N} stroke="#ea4335" strokeDasharray="4 4" />
               </LineChart>
