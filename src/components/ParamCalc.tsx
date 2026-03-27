@@ -2,10 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { Settings, Cpu, Layers, Database, Info, Save, AlertTriangle, ArrowRight } from 'lucide-react';
 
 const PRESETS = {
-  "MORTM-A (Large)": { vocab_size: 650, d_model: 512, dim_feedforward: 512, dim_expert: 512, num_heads: 8, d_layer: 11, num_experts: 6, topk_experts: 2, use_moe_decoder: true },
-  "MORTM-B (Deep)": { vocab_size: 650, d_model: 512, dim_feedforward: 2048, dim_expert: 2048, num_heads: 8, d_layer: 14, num_experts: 14, topk_experts: 2, use_moe_decoder: false },
-  "MORTM-C (Compact)": { vocab_size: 400, d_model: 512, dim_feedforward: 2048, dim_expert: 2048, num_heads: 8, d_layer: 12, num_experts: 5, topk_experts: 2, use_moe_decoder: true },
-  "Custom": { vocab_size: 1000, d_model: 768, dim_feedforward: 3072, dim_expert: 3072, num_heads: 12, d_layer: 12, num_experts: 8, topk_experts: 2, use_moe_decoder: true }
+  "MORTM-A (Large)": { vocab_size: 650, d_model: 512, dim_feedforward: 512, dim_expert: 512, dim_shared_expert: 512, num_heads: 8, d_layer: 11, moe_layer: 11, num_experts: 6, topk_experts: 2, use_moe_decoder: true, use_shared_dense_layer: false },
+  "MORTM-B (Deep)": { vocab_size: 650, d_model: 512, dim_feedforward: 2048, dim_expert: 2048, dim_shared_expert: 2048, num_heads: 8, d_layer: 14, moe_layer: 14, num_experts: 14, topk_experts: 2, use_moe_decoder: false, use_shared_dense_layer: false },
+  "MORTM-C (Compact)": { vocab_size: 400, d_model: 512, dim_feedforward: 2048, dim_expert: 2048, dim_shared_expert: 2048, num_heads: 8, d_layer: 12, moe_layer: 12, num_experts: 5, topk_experts: 2, use_moe_decoder: true, use_shared_dense_layer: false },
+  "Custom": { vocab_size: 1000, d_model: 768, dim_feedforward: 3072, dim_expert: 3072, dim_shared_expert: 3072, num_heads: 12, d_layer: 12, moe_layer: 12, num_experts: 8, topk_experts: 2, use_moe_decoder: true, use_shared_dense_layer: true }
 };
 
 interface TooltipIconProps { text: string }
@@ -53,41 +53,60 @@ const ParamCalc = () => {
   const [activePreset, setActivePreset] = useState("MORTM-A (Large)");
 
   const stats = useMemo(() => {
-    const { vocab_size, d_model, dim_feedforward, dim_expert, d_layer, num_experts, topk_experts, use_moe_decoder } = config;
+    const { 
+      vocab_size, d_model, dim_feedforward, dim_expert, dim_shared_expert, 
+      d_layer, moe_layer, num_experts, topk_experts, 
+      use_moe_decoder, use_shared_dense_layer 
+    } = config;
+    
     const embedding = vocab_size * d_model;
     const attention_params = (3 * d_model * d_model) + (d_model * d_model + d_model);
     const norm_params = (d_model * 2) * 3;
+    
     const ffn_params = 3 * ((d_model * dim_feedforward) + dim_feedforward);
+    const dense_layer_total = attention_params + norm_params + ffn_params;
+    
     const single_expert_params = 3 * ((d_model * dim_expert) + dim_expert);
+    const shared_expert_params = 3 * ((d_model * dim_shared_expert) + dim_shared_expert);
+    
+    const gate_params = num_experts * d_model;
+    const all_experts = num_experts * single_expert_params;
+    const active_experts = topk_experts * single_expert_params;
+    
+    const moe_ffn_total = gate_params + all_experts + shared_expert_params;
+    const moe_ffn_active = gate_params + active_experts + shared_expert_params;
 
-    let ffn_total_layer = 0;
-    let ffn_active_layer = 0;
+    const moe_layer_total = attention_params + norm_params + moe_ffn_total;
+    const moe_layer_active = attention_params + norm_params + moe_ffn_active;
 
-    if (use_moe_decoder) {
-      const gate_params = num_experts * d_model;
-      const all_experts = num_experts * single_expert_params;
-      const shared_expert = ffn_params;
-      ffn_total_layer = gate_params + all_experts + shared_expert;
-      const active_experts = topk_experts * single_expert_params;
-      ffn_active_layer = gate_params + active_experts + shared_expert;
-    } else {
-      ffn_total_layer = ffn_params;
-      ffn_active_layer = ffn_params;
-    }
+    const num_dense = use_moe_decoder 
+      ? (use_shared_dense_layer ? d_layer : 0) 
+      : d_layer;
+      
+    const num_moe = use_moe_decoder 
+      ? (use_shared_dense_layer ? moe_layer : d_layer) 
+      : 0;
 
-    const layer_total = attention_params + norm_params + ffn_total_layer;
-    const layer_active = attention_params + norm_params + ffn_active_layer;
-    const all_layers_total = layer_total * d_layer;
-    const all_layers_active = layer_active * d_layer;
+    const all_layers_total = (dense_layer_total * num_dense) + (moe_layer_total * num_moe);
+    const all_layers_active = (dense_layer_total * num_dense) + (moe_layer_active * num_moe);
+    
+    const total_attention = attention_params * (num_dense + num_moe);
+    const total_ffn = (ffn_params * num_dense) + (moe_ffn_total * num_moe);
+    const total_norm = norm_params * (num_dense + num_moe);
+
     const final_norm = d_model * 2;
     const output_layer = (d_model * vocab_size) + vocab_size;
 
     const total_params = embedding + all_layers_total + final_norm + output_layer;
     const active_params = embedding + all_layers_active + final_norm + output_layer;
     const memory_gb = (total_params * 2) / (1024 ** 3);
-    const sparsity = use_moe_decoder ? 1.0 - (topk_experts / num_experts) : 0;
+    const sparsity = use_moe_decoder ? 1.0 - (topk_experts / num_experts) : 0; 
 
-    return { total_params, active_params, layer_breakdown: { attention: attention_params, ffn: ffn_total_layer, norm: norm_params }, component_breakdown: { embedding, layers: all_layers_total, output: output_layer + final_norm }, memory_gb, sparsity };
+    return { 
+      total_params, active_params, memory_gb, sparsity,
+      layer_breakdown: { attention: total_attention, ffn: total_ffn, norm: total_norm },
+      num_dense, num_moe
+    };
   }, [config]);
 
   const updateConfig = (key: string, value: any) => {
@@ -120,33 +139,42 @@ const ParamCalc = () => {
             <Settings size={20} className="text-[#5f6368]" />
             <h2 className="text-[16px] font-medium text-[#202124]">Configuration</h2>
           </div>
+          
+          <Toggle label="Use MoE Decoder" checked={config.use_moe_decoder} onChange={(v:any) => updateConfig('use_moe_decoder', v)} />
+          {config.use_moe_decoder && (
+            <div className="mb-4">
+               <Toggle label="Shared-Dense Layer" checked={config.use_shared_dense_layer} onChange={(v:any) => updateConfig('use_shared_dense_layer', v)} />
+            </div>
+          )}
+
           <NumberInput label="Vocab Size" value={config.vocab_size} onChange={(v:any) => updateConfig('vocab_size', v)} max={5000} step={10} description="トークンの総数" />
           <NumberInput label="D_Model" value={config.d_model} onChange={(v:any) => updateConfig('d_model', v)} max={4096} step={64} description="埋め込み次元数" />
-          <NumberInput label="Dim Feedforward" value={config.dim_feedforward} onChange={(v:any) => updateConfig('dim_feedforward', v)} max={16384} step={128} description="FFNの中間層次元数" />
-          <NumberInput label="Layers (d_layer)" value={config.d_layer} onChange={(v:any) => updateConfig('d_layer', v)} max={100} description="Decoderの層数" />
+          <NumberInput label={config.use_shared_dense_layer ? "Dense FFN Dim" : "Dim Feedforward"} value={config.dim_feedforward} onChange={(v:any) => updateConfig('dim_feedforward', v)} max={16384} step={128} description="標準FFNの中間層次元数" />
+          <NumberInput label={config.use_shared_dense_layer ? "Dense Layers (d_layer)" : "Layers (d_layer)"} value={config.d_layer} onChange={(v:any) => updateConfig('d_layer', v)} max={100} description={config.use_shared_dense_layer ? "Dense Decoderの層数" : "Decoderの層数"} />
           <NumberInput label="Attention Heads" value={config.num_heads} onChange={(v:any) => updateConfig('num_heads', v)} max={64} description="Multi-head Attentionのヘッド数" />
         </div>
 
-        <div className="google-card p-6 border-t-4 border-t-[#34a853]">
-          <div className="flex items-center gap-2 mb-6">
-            <Cpu size={20} className="text-[#5f6368]" />
-            <h2 className="text-[16px] font-medium text-[#202124]">MoE Settings</h2>
-          </div>
-          <Toggle label="Use MoE Decoder" checked={config.use_moe_decoder} onChange={(v:any) => updateConfig('use_moe_decoder', v)} />
-          {config.use_moe_decoder && (
-            <div className="mt-4 pt-4 border-t border-[#dadce0]">
-              <NumberInput label="Dim Expert" value={config.dim_expert} onChange={(v:any) => updateConfig('dim_expert', v)} max={16384} step={128} description="エキスパート（SwiGLU）の中間層次元数" />
-              <NumberInput label="Num Experts (Routed)" value={config.num_experts} onChange={(v:any) => updateConfig('num_experts', v)} max={64} description="ルーティング対象のエキスパート数" />
-              <NumberInput label="Top-K Experts" value={config.topk_experts} onChange={(v:any) => updateConfig('topk_experts', v)} max={config.num_experts} description="トークンごとにアクティブになるExpert数" />
-              {config.num_experts === config.topk_experts && (
-                <div className="mt-3 p-3 bg-[#fef7e0] border border-[#fbbc04] rounded flex gap-2 text-[#b06000] text-[13px]">
-                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-                  <span>Routed数とTop-Kが一致。スパース性による計算効率の向上はありません。</span>
-                </div>
-              )}
+        {config.use_moe_decoder && (
+          <div className="google-card p-6 border-t-4 border-t-[#34a853]">
+            <div className="flex items-center gap-2 mb-6">
+              <Cpu size={20} className="text-[#5f6368]" />
+              <h2 className="text-[16px] font-medium text-[#202124]">MoE Settings</h2>
             </div>
-          )}
-        </div>
+            {config.use_shared_dense_layer && (
+              <NumberInput label="MoE Layer" value={config.moe_layer} onChange={(v:any) => updateConfig('moe_layer', v)} max={100} description="MoE専用のレイヤー数" />
+            )}
+            <NumberInput label="Shared-Expert Dim" value={config.dim_shared_expert} onChange={(v:any) => updateConfig('dim_shared_expert', v)} max={16384} step={128} description="共有エキスパートの中間層次元数" />
+            <NumberInput label="Routed Expert Dim" value={config.dim_expert} onChange={(v:any) => updateConfig('dim_expert', v)} max={16384} step={128} description="ルーティング対象エキスパートの中間層次元数" />
+            <NumberInput label="Num Experts (Routed)" value={config.num_experts} onChange={(v:any) => updateConfig('num_experts', v)} max={64} description="ルーティング対象のエキスパート数" />
+            <NumberInput label="Top-K Experts" value={config.topk_experts} onChange={(v:any) => updateConfig('topk_experts', v)} max={config.num_experts} description="トークンごとにアクティブになるExpert数" />
+            {config.num_experts === config.topk_experts && (
+              <div className="mt-3 p-3 bg-[#fef7e0] border border-[#fbbc04] rounded flex gap-2 text-[#b06000] text-[13px]">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <span>Routed数とTop-Kが一致。スパース性による計算効率の向上はありません。</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="lg:col-span-8 flex flex-col gap-6">
@@ -161,7 +189,7 @@ const ParamCalc = () => {
             <div className="text-[32px] font-normal text-[#202124] mb-1">{formatParams(stats.active_params)}</div>
             <div className="text-[13px] text-[#5f6368] flex justify-between">
               <span>Utilization: <span className="font-medium text-[#202124]">{((stats.active_params / stats.total_params) * 100).toFixed(1)}%</span></span>
-              {config.use_moe_decoder && <span>Sparsity: <span className="font-medium text-[#188038]">{(stats.sparsity * 100).toFixed(1)}%</span></span>}
+              {config.use_moe_decoder && <span>Expert Sparsity: <span className="font-medium text-[#188038]">{(stats.sparsity * 100).toFixed(1)}%</span></span>}
             </div>
           </div>
         </div>
@@ -181,47 +209,66 @@ const ParamCalc = () => {
           </div>
 
           <div className="space-y-5">
-            <h4 className="text-[14px] font-medium text-[#5f6368] border-b border-[#dadce0] pb-2">Component Distribution (Per Layer)</h4>
+            <h4 className="text-[14px] font-medium text-[#5f6368] border-b border-[#dadce0] pb-2">Component Distribution (All Layers)</h4>
             
             {/* Architecture Visualization Block */}
             <div className="bg-[#f8f9fa] border border-[#dadce0] rounded p-4 mb-2 overflow-x-auto text-[13px] font-mono">
-              <div className="flex items-center gap-3 text-[#3c4043] min-w-max">
+              <div className="flex items-center gap-3 text-[#3c4043] w-max max-w-full">
                 <div className="px-3 py-1.5 bg-white border border-[#dadce0] rounded-md shadow-sm">
                   <div className="font-semibold text-center">Embedding</div>
                   <div className="text-[#1a73e8] text-center">{config.d_model}</div>
                 </div>
                 
-                <ArrowRight size={16} className="text-[#80868b]" />
+                <ArrowRight size={16} className="shrink-0 text-[#80868b]" />
 
-                <div className="px-3 py-2 bg-[#e8f0fe] border border-[#8ab4f8] rounded-md shadow-sm relative flex flex-col items-center">
-                  <div className="absolute -top-2.5 -right-2.5 bg-[#1a73e8] text-white text-[11px] font-bold px-1.5 py-0.5 rounded-full border border-white">
-                    x{config.d_layer}
-                  </div>
-                  <div className="font-semibold text-center mb-2 text-[#1967d2] text-[12px]">Decoder Layer</div>
-                  <div className="flex items-center gap-2">
-                    <div className="px-2 py-1 bg-white border border-[#dadce0] rounded">
-                      <div className="text-center font-medium">Attention</div>
-                      <div className="text-[#1a73e8] text-center">{config.d_model}</div>
+                {stats.num_dense > 0 && (
+                  <>
+                    <div className="px-3 py-2 bg-[#e8f0fe] border border-[#8ab4f8] rounded-md shadow-sm relative flex flex-col items-center">
+                      <div className="absolute -top-2.5 -right-2.5 bg-[#1a73e8] text-white text-[11px] font-bold px-1.5 py-0.5 rounded-full border border-white">
+                        x{stats.num_dense}
+                      </div>
+                      <div className="font-semibold text-center mb-2 text-[#1967d2] text-[12px]">Dense Layer</div>
+                      <div className="flex items-center gap-2">
+                        <div className="px-2 py-1 bg-white border border-[#dadce0] rounded">
+                          <div className="text-center font-medium">Attention</div>
+                          <div className="text-[#1a73e8] text-center">{config.d_model}</div>
+                        </div>
+                        <ArrowRight size={14} className="text-[#8ab4f8]" />
+                        <div className="px-2 py-1 bg-white border border-[#dadce0] rounded">
+                          <div className="text-center font-medium">SwiGLU</div>
+                          <div className="text-[#f29900] text-center">{config.dim_feedforward}</div>
+                        </div>
+                      </div>
                     </div>
                     
-                    <ArrowRight size={14} className="text-[#8ab4f8]" />
-                    
-                    {config.use_moe_decoder ? (
-                      <div className="px-2 py-1 bg-white border border-[#fbbc04] rounded flex flex-col items-center">
-                         <div className="text-center font-medium">MoE (SwiGLU)</div>
-                         <div className="text-[#f29900] text-center text-[11px] mt-0.5">Shared FFN ({config.dim_feedforward})</div>
-                         <div className="text-[#f29900] text-center text-[11px]">+ Top-{config.topk_experts} Experts ({config.dim_expert})</div>
-                      </div>
-                    ) : (
-                      <div className="px-2 py-1 bg-white border border-[#dadce0] rounded">
-                        <div className="text-center font-medium">SwiGLU</div>
-                        <div className="text-[#f29900] text-center">{config.dim_feedforward}</div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                    <ArrowRight size={16} className="shrink-0 text-[#80868b]" />
+                  </>
+                )}
 
-                <ArrowRight size={16} className="text-[#80868b]" />
+                {stats.num_moe > 0 && (
+                  <>
+                    <div className="px-3 py-2 bg-[#fef7e0] border border-[#fbbc04] rounded-md shadow-sm relative flex flex-col items-center">
+                      <div className="absolute -top-2.5 -right-2.5 bg-[#f29900] text-white text-[11px] font-bold px-1.5 py-0.5 rounded-full border border-white">
+                        x{stats.num_moe}
+                      </div>
+                      <div className="font-semibold text-center mb-2 text-[#b06000] text-[12px]">MoE Layer</div>
+                      <div className="flex items-center gap-2">
+                        <div className="px-2 py-1 bg-white border border-[#dadce0] rounded">
+                          <div className="text-center font-medium">Attention</div>
+                          <div className="text-[#1a73e8] text-center">{config.d_model}</div>
+                        </div>
+                        <ArrowRight size={14} className="text-[#fbbc04]" />
+                        <div className="px-2 py-1 bg-white border border-[#fbbc04] rounded flex flex-col items-center">
+                            <div className="text-center font-medium">MoE (SwiGLU)</div>
+                            <div className="text-[#f29900] text-center text-[11px] mt-0.5">Shared FFN ({config.dim_shared_expert})</div>
+                            <div className="text-[#f29900] text-center text-[11px]">+ Top-{config.topk_experts} Experts ({config.dim_expert})</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <ArrowRight size={16} className="shrink-0 text-[#80868b]" />
+                  </>
+                )}
 
                 <div className="px-3 py-1.5 bg-white border border-[#dadce0] rounded-md shadow-sm">
                   <div className="font-semibold text-center">UnEmbedding</div>
@@ -238,8 +285,9 @@ const ParamCalc = () => {
           <div className="mt-8 pt-6 border-t border-[#dadce0] text-[13px] text-[#5f6368]">
             <p className="flex items-center gap-1 mb-2 font-medium"><Info size={14} /> 計算ロジックについての補足:</p>
             <ul className="list-disc pl-5 space-y-1">
+              <li>{config.use_moe_decoder && config.use_shared_dense_layer ? "Dense層とMoE層を組み合わせたハイブリッドアーキテクチャとしてパラメーターを計算しています。" : "全レイヤーに対して共通の計算式を適用しています。"}</li>
+              <li>{config.use_moe_decoder && "MoE内では、共有エキスパートとルーティング対象のエキスパートがそれぞれ異なる次元を持つことができます。"}</li>
               <li>FFNおよびExpertはSwiGLU構造 (Linear x 3) として計算しています。</li>
-              <li>Num Expertsはルーティング対象のみの数です。別途1つの共有Expert (FFNと同次元) が加算されます。</li>
             </ul>
           </div>
         </div>
